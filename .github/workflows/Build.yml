@@ -1,0 +1,56 @@
+name: Nix Build & Upload
+
+on:
+  push:
+
+jobs:
+  develop:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch source code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: fcitx5-android
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      - name: Build Release APK
+        run: |
+          nix develop .#noAS --command ./gradlew :app:assembleRelease
+          nix develop .#noAS --command ./gradlew :assembleReleasePlugins
+
+      - name: Upload App APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Pack plugins
+        shell: bash
+        run: |
+          mkdir -p plugins-to-upload
+          for i in $(ls plugin)
+          do
+            if [ -d "plugin/${i}/build/outputs/apk/release" ]
+            then
+              cp -r "plugin/${i}/build/outputs/apk/release" "plugins-to-upload/${i}"
+            fi
+          done
+
+      - name: Upload Plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-release-${{ github.run_number }}
+          path: plugins-to-upload/
+          if-no-files-found: warn
+          retention-days: 30
