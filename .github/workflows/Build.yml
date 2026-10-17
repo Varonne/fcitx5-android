@@ -41,47 +41,68 @@ jobs:
             -dname "CN=GitHub Actions, OU=Dev, O=Dev, L=Dev, ST=Dev, C=CN"
 
       # 3. 使用 apksigner 统一签名
-      - name: Sign APKs
+      - name: Find and Sign APKs
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           
-          echo "Signing main app..."
-          # 在主程序构建目录下找 apk
-          find build/app/outputs/apk/release/ -name "*.apk" | while read apk; do
-            $APKSIGNER sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias mykey "$apk"
-          done
+          echo "===== 正在搜索所有生成的 APK ====="
+          # 在整个工作目录下搜索所有的 .apk 文件
+          APKS=$(find . -name "*.apk" -type f)
+          echo "$APKS"
           
-          echo "Signing plugins..."
-          # 在插件构建目录下找 apk
-          find build/plugin -path "*/outputs/apk/release/*.apk" | while read apk; do
+          if [ -z "$APKS" ]; then
+            echo "错误：没有找到任何 APK！请检查构建步骤是否真正成功了。"
+            exit 1
+          fi
+          
+          for apk in $APKS; do
+            echo "正在签名: $apk"
             $APKSIGNER sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias mykey "$apk"
           done
 
-      # 4. 上传 App 产物
+      # 4. 收集产物并分类
+      - name: Collect APKs
+        shell: bash
+        run: |
+          mkdir -p output-app
+          mkdir -p output-plugins
+          
+          # 遍历刚才找到的所有 apk
+          find . -name "*.apk" -type f | while read apk; do
+            # 如果是主程序 (路径包含 app 且不包含 plugin)
+            if [[ "$apk" == *"/app/"* ]] && [[ "$apk" != *"/plugin/"* ]]; then
+              cp "$apk" output-app/
+            # 如果是插件
+            elif [[ "$apk" == *"/plugin/"* ]]; then
+              # 提取插件名，例如 ./plugin/cloud-pinyin/build/... -> cloud-pinyin
+              module=$(echo "$apk" | grep -oP '(?<=plugin/)[^/]+' | head -n 1)
+              if [ -n "$module" ]; then
+                mkdir -p "output-plugins/$module"
+                cp "$apk" "output-plugins/$module/"
+              fi
+            fi
+          done
+          
+          echo "===== 收集完成，以下是准备上传的文件 ====="
+          echo "--- App 文件 ---"
+          ls -R output-app/ || echo "没有 App 产物"
+          echo "--- 插件文件 ---"
+          ls -R output-plugins/ || echo "没有插件产物"
+
+      # 5. 上传 App 产物
       - name: Upload App APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release-arm64-v8a-${{ github.run_number }}
-          path: build/app/outputs/apk/release/
+          path: output-app/
           if-no-files-found: error
           retention-days: 30
 
-      # 5. 收集并上传插件产物
-      - name: Pack plugins
-        shell: bash
-        run: |
-          mkdir -p plugins-to-upload
-          find build/plugin -path "*/outputs/apk/release/*.apk" | while read apk; do
-            # 提取插件名，例如 build/plugin/cloud-pinyin/outputs/apk/release/xxx.apk -> cloud-pinyin
-            module=$(echo "$apk" | cut -d'/' -f3)
-            mkdir -p "plugins-to-upload/$module"
-            cp "$apk" "plugins-to-upload/$module/"
-          done
-
+      # 6. 上传插件产物
       - name: Upload Plugins
         uses: actions/upload-artifact@v4
         with:
           name: plugins-release-arm64-v8a-${{ github.run_number }}
-          path: plugins-to-upload/
+          path: output-plugins/
           if-no-files-found: warn
           retention-days: 30
