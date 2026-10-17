@@ -43,16 +43,17 @@ jobs:
       # 3. 使用 apksigner 统一签名
       - name: Sign APKs
         run: |
-          # 寻找最新的 apksigner
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           
           echo "Signing main app..."
-          find app/build/outputs/apk/release/ -name "*.apk" | while read apk; do
+          # 在主程序构建目录下找 apk
+          find build/app/outputs/apk/release/ -name "*.apk" | while read apk; do
             $APKSIGNER sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias mykey "$apk"
           done
           
           echo "Signing plugins..."
-          find plugin -path "*/build/outputs/apk/release/*.apk" | while read apk; do
+          # 在插件构建目录下找 apk
+          find build/plugin -path "*/outputs/apk/release/*.apk" | while read apk; do
             $APKSIGNER sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias mykey "$apk"
           done
 
@@ -61,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release-arm64-v8a-${{ github.run_number }}
-          path: app/build/outputs/apk/release/
+          path: build/app/outputs/apk/release/
           if-no-files-found: error
           retention-days: 30
 
@@ -70,12 +71,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p plugins-to-upload
-          for i in $(ls plugin)
-          do
-            if [ -d "plugin/${i}/build/outputs/apk/release" ]
-            then
-              cp -r "plugin/${i}/build/outputs/apk/release" "plugins-to-upload/${i}"
-            fi
+          find build/plugin -path "*/outputs/apk/release/*.apk" | while read apk; do
+            # 提取插件名，例如 build/plugin/cloud-pinyin/outputs/apk/release/xxx.apk -> cloud-pinyin
+            module=$(echo "$apk" | cut -d'/' -f3)
+            mkdir -p "plugins-to-upload/$module"
+            cp "$apk" "plugins-to-upload/$module/"
           done
 
       - name: Upload Plugins
